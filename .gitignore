@@ -1,0 +1,14 @@
+token.json
+*.env
+.vs/
+bin/
+obj/
+x64/
+x86/
+*.exe
+*.user
+*.pdb
+*.vcxproj.filters
+*.vcxproj
+*.slnx
+ClutchSync.slngit ix

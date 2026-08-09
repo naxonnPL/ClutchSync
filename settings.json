@@ -1,0 +1,21 @@
+{
+  "volume": {
+    "master": 80,
+    "lobby": 70,
+    "mvp": 100
+  },
+  "fading": {
+    "fade_duration_ms": 1500
+  },
+  "tracks": {
+    "lobby": {
+      "uri": "spotify:track:1YTvnpDmqBAgld6hOjNEN1",
+        "start_seconds": 0
+    },
+    "mvp": {
+      "uri": "spotify:track:6zfT9uWmfX4YVXq3MU93dH",
+      "start_seconds": 15.2,
+      "duration_seconds": 10
+    }
+  }
+}
