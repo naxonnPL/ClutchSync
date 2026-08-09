@@ -5,16 +5,18 @@ Developed by [naxonn](https://github.com/naxonnPL)
 
 
 
-A light C++ application that integrates **Counter-Strike 2** with the **Spotify API**. Program automatically controls music playback based on the current game state (Game State Integration).
+A light C++ application that integrates **Counter-Strike 2** with the **Spotify API**. The program automatically controls music playback based on the current game state (Game State Integration).
 
-
+### 🛠️ Built with Dependencies
+* [nlohmann/json](https://github.com/nlohmann/json) - JSON for Modern C++ by Niels Lohmann (MIT License).
+* [cpp-httplib](https://github.com/yhirose/cpp-httplib) - A C++ header-only HTTP/HTTPS server and client library by Yuji Hirose (MIT License).
 
 #### **Features**
 
 * **🎧** **Lobby** - Seamless playback of your selected track while browsing the main menu.
 * **🛒** **Buy Time** - Automatically lowers volume so you can focus on the team callouts.
 * **🔇** **Round Mute** - Instantly pauses music as soon as the round starts.
-* **🏆** **MVP Kit** - Triggers a designated track at specific moment when you earn MVP reward.
+* **🏆** **MVP Kit** - Triggers a designated track at a specific moment when you earn an MVP reward.
 
 
 
