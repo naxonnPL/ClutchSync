@@ -1,4 +1,7 @@
-# **ClutchSync**
+# **ClutchSync** (Beta)
+Developed by [naxonn](https://github.com/naxonnPL)
+
+
 
 
 
@@ -6,12 +9,12 @@ A light C++ application that integrates **Counter-Strike 2** with the **Spotify 
 
 
 
-#### **Features:**
+#### **Features**
 
-* **🎧Lobby** - Seamless playback of your selected track while browsing the main menu.
+* **🎧** **Lobby** - Seamless playback of your selected track while browsing the main menu.
 * **🛒** **Buy Time** - Automatically lowers volume so you can focus on the team callouts.
-* **🔇Round Mute** - Instantly pauses music as soon as the round starts.
-* **🏆** **MVP Kit** - Triggers a designated track at specific moment when you earn MVP reward
+* **🔇** **Round Mute** - Instantly pauses music as soon as the round starts.
+* **🏆** **MVP Kit** - Triggers a designated track at specific moment when you earn MVP reward.
 
 
 
@@ -19,10 +22,10 @@ A light C++ application that integrates **Counter-Strike 2** with the **Spotify 
 
 
 
-#### **🖥️Requirements:**
+#### **🖥️Requirements**
 
-* **Spotify Premium account** to access Spotify Web API for playback control
-* **Active Spotify Client** running in the background (e.g.,Spotify Desktop App)
+* **Spotify Premium account** to access Spotify Web API for playback control.
+* **Active Spotify Client** running in the background (e.g.,Spotify Desktop App).
 
 
 
@@ -30,45 +33,43 @@ A light C++ application that integrates **Counter-Strike 2** with the **Spotify 
 
 
 
-#### **🔐Setup Guide:**
+#### **🔐Setup Guide**
 
 ##### **For: token.json**
 
 ###### **Create a Spotify Developer App:**
 
-* Navigate to the \[**Spotify Developer Dashboard](**https://developer.spotify.com/dashboard) and sign in.
+* Navigate to the [Spotify Developer Dashboard](https://developer.spotify.com/dashboard) and sign in.
 * Click **Create App (Web API)**
 * In your app's **settings**, add the following URL under **Redirect URIs:**
+`http://127.0.0.1:3000/callback`
 
-&#x20;      \[http://127.0.0.1:3000/callback]http://127.0.0.1:3000/callback
-
-4.- Save the changes and copy your **Client ID** and **Client Secret**
-
-
-
-###### **Generate Access \& Refresh Tokens:**
-
-* Open the following URL in your browser (replace '**YOUR\_CLIENT\_ID'** with your actual Client ID):
+* Save the changes and copy your **Client ID** and **Client Secret**
 
 
 
-**https://accounts.spotify.com/authorize?response\_type=code\&client\_id=YOUR\_CLIENT\_ID\&scope=user-modify-playback-state%20user-read-playback-state\&redirect\_uri=http://127.0.0.1:3000/callback**
+###### **Generate Access & Refresh Tokens:**
 
+* Open the following URL in your browser (replace '**YOUR_CLIENT_ID'** with your actual Client ID):
+
+
+
+`https://accounts.spotify.com/authorize?response_type=code&client_id=YOUR_CLIENT_ID&scope=user-modify-playback-state%20user-read-playback-state&redirect_uri=http://127.0.0.1:3000/callback`
 
 
 * Log in to Spotify and click **Agree.**
 
 
 
-**3. Extract AUTHORIZATION CODE:** You will be redirected to an unreachable page (This site can't be reached). Look at your browser's address bar and copy the full string after **code=** to the end.
+* Extract **AUTHORIZATION CODE:** You will be redirected to an unreachable page (This site can't be reached). Look at your browser's address bar and copy the full string after **code=** to the end.
 
-* Paste **CLIENT\_ID** and **CLIENT\_SECRET** code to **token.json** (**1st** and **2nd** row)
+* Paste **CLIENT_ID** and **CLIENT_SECRET** code to **token.json** (**1st** and **2nd** row)
 * Open **PowerShell** and run the following command (replace parameters with your actual values).
 
 
-
-**$auth = \[Convert]::ToBase64String(\[Text.Encoding]::ASCII.GetBytes("YOUR\_CLIENT\_ID:YOUR\_CLIENT\_SECRET")); Invoke-RestMethod -Uri "https://accounts.spotify.com/api/token" -Method Post -Headers @{ Authorization = "Basic $auth"; "Content-Type" = "application/x-www-form-urlencoded" } -Body @{ grant\_type = "authorization\_code"; code = "YOUR\_AUTHORIZATION\_CODE"; redirect\_uri = "http://127.0.0.1:3000/callback" } | ConvertTo-Json**
-
+```powershell
+$auth = [Convert]::ToBase64String([Text.Encoding]::ASCII.GetBytes("YOUR_CLIENT_ID:YOUR_CLIENT_SECRET")); Invoke-RestMethod -Uri "https://accounts.spotify.com/api/token" -Method Post -Headers @{ Authorization = "Basic $auth"; "Content-Type" = "application/x-www-form-urlencoded" } -Body @{ grant_type = "authorization_code"; code = "YOUR_AUTHORIZATION_CODE"; redirect_uri = "http://127.0.0.1:3000/callback" } | ConvertTo-Json
+```
 
 
 You should get similar output:
@@ -120,7 +121,7 @@ To configure custom tracks or playlists for specific events, you need to use **S
 4. Take ID between '**/track/**' and **'?' (e.g., 6zfT9uWmfX4YVXq3MU93dH)** and add '**spotify:track:**'
 5. It should look like this: **spotify:track:6zfT9uWmfX4YVXq3MU93dH**
 
-
+Have fun!
 
 
 
