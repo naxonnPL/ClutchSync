@@ -298,7 +298,7 @@ std::string getJsonStringSafe(const json& parent, const std::string& key) {
     return "";
 }
 
-void handleGameState(const json& j) { // "C:\Program Files (x86)\Steam\steamapps\common\Counter-Strike Global Offensive\game\csgo\cfg\gamestate_integration_spotify.cfg"
+void handleGameState(const json& j) { // "C:\Program Files (x86)\Steam\steamapps\common\Counter-Strike Global Offensive\game\csgo\cfg\gamestate_integration_ClutchSync.cfg"
     try {
         if (isInLobby(j)) {
             if (currentState != STATE_LOBBY) {
@@ -542,7 +542,7 @@ bool startServer() { // GSI server
     std::cout << "[i] Server online on port 6767...\n";
 
     if (!svr.listen("127.0.0.1", 6767)) {
-        std::cout << "[W] If the application doesn't work, use \"netstat - ano | findstr 127.0.0.1\" and write in \"void startServer()\": svr.listen(\"127.0.0.1\", ENTER_FREE_PORT_HERE);\", which doesn't appear in console.\nAlso don't forget to change port in \"gamestate_integration_spotify.cfg\".\nBoth ports must be the same.\n";
+        std::cout << "[W] If the application doesn't work, use \"netstat - ano | findstr 127.0.0.1\" and write in \"void startServer()\": svr.listen(\"127.0.0.1\", ENTER_FREE_PORT_HERE);\", which doesn't appear in console.\nAlso don't forget to change port in \"gamestate_integration_ClutchSync.cfg\".\nBoth ports must be the same.\n";
         return false;
     }
     return true;
