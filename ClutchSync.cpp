@@ -83,6 +83,7 @@ enum ExitCode {
 };
 */
 AppSettings config;
+
 bool loadSettings() {
     std::ifstream file("settings.json");
     if (!file.is_open()) {
@@ -93,33 +94,63 @@ bool loadSettings() {
         json j;
         file >> j;
 
-        auto vol = j.value("volume", json::object());
-        auto fading = j.value("fading", json::object());
-        auto tracks = j.value("tracks", json::object());
+        if (j.contains("volume") && j["volume"].is_object()) {
+            auto vol = j["volume"];
+            if (vol.contains("master") && vol["master"].is_number()) {
+                config.masterVol = vol["master"].get<float>() / 100.0f;
+            }
+            if (vol.contains("lobby") && vol["lobby"].is_number()) {
+                config.lobbyVol = vol["lobby"].get<float>() / 100.0f;
+            }
+            if (vol.contains("mvp") && vol["mvp"].is_number()) {
+                config.mvpVol = vol["mvp"].get<float>() / 100.0f;
+            }
+        }
 
-        config.masterVol = vol.value("master", config.masterVol * 100.0f) / 100.0f;
-        config.lobbyVol = vol.value("lobby", config.lobbyVol * 100.0f) / 100.0f;
-        config.mvpVol = vol.value("mvp", config.mvpVol * 100.0f) / 100.0f;
-        config.fadeDurationMs = fading.value("fade_duration_ms", config.fadeDurationMs);
-
+        // fading
+        if (j.contains("fading") && j["fading"].is_object()) {
+            auto fading = j["fading"];
+            if (fading.contains("fade_duration_ms") && fading["fade_duration_ms"].is_number_integer()) {
+                config.fadeDurationMs = fading["fade_duration_ms"].get<int>();
+            }
+        }
         // lobby
-        json lobbyNode = tracks.value("lobby", json::object());
-        config.lobbyUri = lobbyNode.value("uri", config.lobbyUri);
-        config.lobbyStartMs = lobbyNode.value("start_seconds", config.lobbyStartMs / 1000) * 1000;
+        if (j.contains("tracks") && j["tracks"].is_object()) {
+            auto tracks = j["tracks"];
+
+            if (tracks.contains("lobby") && tracks["lobby"].is_object()) {
+                auto lobbyNode = tracks["lobby"];
+                if (lobbyNode.contains("uri") && lobbyNode["uri"].is_string()) {
+                    config.lobbyUri = lobbyNode["uri"].get<std::string>();
+                }
+                if (lobbyNode.contains("start_seconds") && lobbyNode["start_seconds"].is_number()) {
+                    config.lobbyStartMs = static_cast<int>(lobbyNode["start_seconds"].get<double>() * 1000.0);
+                }
+            }
 
         // mvp
-        json mvpNode = tracks.value("mvp", json::object());
-        config.mvpUri = mvpNode.value("uri", config.mvpUri);
-
-
-        config.mvpStartMs = mvpNode.value("start_seconds", config.mvpStartMs / 1000) * 1000;
-        config.mvpDurationSec = mvpNode.value("duration_seconds", config.mvpDurationSec);
+        if (tracks.contains("mvp") && tracks["mvp"].is_object()) {
+            auto mvpNode = tracks["mvp"];
+            if (mvpNode.contains("uri") && mvpNode["uri"].is_string()) {
+                config.mvpUri = mvpNode["uri"].get<std::string>();
+            }
+            if (mvpNode.contains("start_seconds") && mvpNode["start_seconds"].is_number()) {
+                config.mvpStartMs = static_cast<int>(mvpNode["start_seconds"].get<double>() * 1000.0);
+            }
+            if (mvpNode.contains("duration_seconds") && mvpNode["duration_seconds"].is_number()) {
+                config.mvpDurationSec = mvpNode["duration_seconds"].get<float>();
+            }
+        }
+    }
 
         std::cout << "[CONFIG] Settings loaded!\n";
+        std::cout << "[CONFIG] Loaded values -> Master: " << (config.masterVol * 100)
+            << "%, Lobby: " << (config.lobbyVol * 100)
+            << "%, MVP: " << (config.mvpVol * 100) << "%\n";
         return true;
     }
     catch (const std::exception& e) {
-        std::cerr << "[!] Error parsing settings.json: " << e.what() << "\n";
+        std::cerr << "[!] Error parsing settings.json: " << e.what() << "Using defaults.\n";
         return false;
     }
 }
@@ -188,20 +219,20 @@ bool refreshSpotifyToken() {
         if (j.contains("access_token")) {
             spotifyAccessToken = j["access_token"].get<std::string>();
             std::cout << "[Spotify API] Token successfully refreshed!\n";
-            if (j.contains("refresh_token")) {
-                spotifyRefreshToken = j["refresh_token"].get<std::string>();
-            }
-
-            json data; // saving new token to token.json
-            data["spotify_token"] = spotifyAccessToken;
-            data["refresh_token"] = spotifyRefreshToken;
-            data["client_id"] = spotifyClientId;
-            data["client_secret"] = spotifyClientSecret;
-
-            std::ofstream out("token.json");
-            out << data.dump(4);
-            return true;
         }
+        if (j.contains("refresh_token")) {
+            spotifyRefreshToken = j["refresh_token"].get<std::string>();
+        }
+
+        json data; // saving new token to token.json
+        data["spotify_token"] = spotifyAccessToken;
+        data["refresh_token"] = spotifyRefreshToken;
+        data["client_id"] = spotifyClientId;
+        data["client_secret"] = spotifyClientSecret;
+
+        std::ofstream out("token.json");
+        out << data.dump(4);
+        return true;
     }
     catch (const std::exception& e) {
         std::cerr << "[!] Parsing error of token response: " << e.what() << "\n";
@@ -475,12 +506,17 @@ float setSpotifyVolume(float newVolume) {
                                 if (checkSpotifyProcess(processId)) {
                                     ISimpleAudioVolume* pSimpleAudioVolume = NULL;
                                     if (SUCCEEDED(pSessionControl2->QueryInterface(IID_PPV_ARGS(&pSimpleAudioVolume)))) {
-                                        pSimpleAudioVolume->GetMasterVolume(&previousVolume);
+                                        float volFetch = 1.0f;
+                                        if (SUCCEEDED(pSimpleAudioVolume->GetMasterVolume(&volFetch))) {
+                                            previousVolume = volFetch;
+                                        }
 
                                         pSimpleAudioVolume->SetMasterVolume(newVolume, NULL);
                                         pSimpleAudioVolume->Release();
                                         currentSpotifyVolume = newVolume;
-                                        success = true;
+                                        pSessionControl2->Release();
+                                        pSessionControl->Release();
+                                        break;
                                     }
                                 }
                                 pSessionControl2->Release();
@@ -551,7 +587,9 @@ bool startServer() { // GSI server
 BOOL WINAPI consoleHandler(DWORD signal) {
     if (signal == CTRL_CLOSE_EVENT || signal == CTRL_C_EVENT || signal == CTRL_LOGOFF_EVENT || signal == CTRL_SHUTDOWN_EVENT) {
         std::cout << "\n[!] Cleanup: Restoring original Spotify volume (" << (originalSpotifyVolume * 100.0f) << "%)...\n";
+        CoInitializeEx(NULL, COINITBASE_MULTITHREADED);
         setSpotifyVolume(originalSpotifyVolume);
+        std::this_thread::sleep_for(std::chrono::milliseconds(150));
         CoUninitialize();
         return TRUE;
     }
@@ -573,11 +611,14 @@ int main()
     loadSettings();
     if (!loadToken()) {
         std::cerr << "[!] Error with token read.\n";
+        CoUninitialize();
         system("pause");
         return -1;
     }
     checkAndStartSpotify();
 
+    std::this_thread::sleep_for(std::chrono::milliseconds(1000));
+    
     originalSpotifyVolume = setSpotifyVolume(config.lobbyVol);
     std::cout << "[i] Saved original Spotify volume: " << (originalSpotifyVolume * 100.0f) << "%\n";
 
@@ -586,6 +627,7 @@ int main()
         CoUninitialize();
         return -3;
     }
+    CoUninitialize();
     return 0;
 }
 
