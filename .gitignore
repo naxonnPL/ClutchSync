@@ -13,3 +13,4 @@ x86/
 *.vcxproj
 *.slnx
 ClutchSync.slngit ix
+gamestate_integration_ClutchSync.cfg

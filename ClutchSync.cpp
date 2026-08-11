@@ -1,4 +1,4 @@
-﻿// CS2 music
+﻿// ClutchSync
 // [i] - information
 // [Spotify API] Spotify API info / status
 // [W] - warning
@@ -8,24 +8,25 @@
 // windows
 #define WIN32_LEAN_AND_MEAN
 
-#include <WinSock2.h>
-#include <windows.h>
-#include <shellapi.h>
-#include <wincrypt.h>
-
+#include <WinSock2.h> // windows sockets
+#include <windows.h> // windows API
+#include <shellapi.h> // windows shell
+#include <wincrypt.h> // encryption for Spotify API
 #include <tlhelp32.h>
-#include <mmdeviceapi.h>
-#include <audiopolicy.h>
+#include <mmdeviceapi.h> // multimedia devices
+#include <audiopolicy.h> // audio
 
 // C++ standard library
-#include <fstream>
-#include <iostream>
-#include <string>
+#include <fstream> // files (e.g. settings.json and token.json)
+#include <iostream> // input/output
+#include <string> // 
 #include <algorithm>
-#include <cwchar>
-#include <thread>
-#include <chrono>
+#include <cwchar> // wide characters for windows API
+#include <thread> // multithreading for multiple functions to work simultaneously
+#include <chrono> // time
 #include <mutex>
+#include <atomic> // multi thread safety
+#include <cstdio> // FILE, _popen/popen/_pclose/pclose for curl.exe (used in sendSpotifyGet())
 
 // third party library
 #include "httplib.h"
@@ -37,52 +38,91 @@
 #pragma comment(lib, "Crypt32.lib")
 
 using json = nlohmann::json;
-
 std::mutex gsiMutex;
 
 float setSpotifyVolume(float volume);
 bool isInLobby(const json& gsiData);
 bool sendSpotifyPut(const std::string& endpoint, const std::string& jsonBody = "");
-void fadeVolume(float startVol, float endVol, int durationMs);
+void fadeVolume(float startVol, float endVol, int durationMs, int targetState);
 bool checkSpotifyProcess(DWORD processId);
 bool spotifyPlayUri(const std::string& uri, int positionMs);
 bool spotifyPause();
+bool sendSpotifyGet(const std::string& endpoint, std::string& responseOutput);
 
+
+
+// settings.json:
 std::string spotifyAccessToken;
 std::string spotifyRefreshToken;
 std::string spotifyClientId;
 std::string spotifyClientSecret;
 
+// music duration Spotify API:
+std::atomic<int> g_LobbyMusicDuration{ 0 }; // data from ExitCode checkMusicLength()
+std::atomic<int> g_MVPMusicDuration{ 0 }; // data from ExitCode checkMusicLength()
+
+// Default settings if settings.json won't work
 struct AppSettings { // default
-    float masterVol = 1.0f;
+    // volume
+
     float lobbyVol = 0.6f;
     float mvpVol = 1.0f;
+    float freezeTimeVol = 0.3f;
+    float roundStartVol = 0.4f;
+    
+    // fading
     int fadeDurationMs = 1500;
 
+    // lobby
     std::string lobbyUri = "spotify:track:1YTvnpDmqBAgld6hOjNEN1";
-    int lobbyStartMs = 0;
+    int lobbyStartSeconds = 0;
 
+    // mvp
     std::string mvpUri = "spotify:track:6zfT9uWmfX4YVXq3MU93dH";
-    int mvpStartMs = 15500;
+    int mvpStartSeconds = 15500;
     float mvpDurationSec = 6.0f;
+
+    // freezeTime
+    std::string freezeTimeUri = "spotify:track:4Fv6wNYUixnYkj3Dgfrls8";
+    int freezeTimeStartSeconds = 15000;
+
+    // roundStart
+    std::string roundStartUri = "spotify:track:53AkM8aF3lSu1nShMOj418";
+    int roundStartStartSeconds = 10200;
+    float roundStartDurationSeconds = 5.0f;
 };
 
-enum GameState { STATE_UNKNOWN, STATE_LOBBY, STATE_FREEZETIME, STATE_LIVE, STATE_OVER };
-GameState currentState = STATE_UNKNOWN;
+// CS2 GSI STATE
+enum GameState {
+    STATE_UNKNOWN,
+    STATE_LOBBY,
+    STATE_FREEZETIME,
+    STATE_LIVE,
+    STATE_OVER
+};
+std::atomic<GameState> currentState{ STATE_UNKNOWN };
 
-float originalSpotifyVolume = 1.0f;
-float currentSpotifyVolume = 1.0f;
-int myLastMvpCount = -1;
 
-/*
+float originalSpotifyVolume = 1.0f; // to restore the volume level from before the program was launched
+std::atomic<float> currentSpotifyVolume{1.0f};
+int myLastMvpCount = -1; // MVP count for handleGameState()
+static std::string lastRoundPhase = ""; // for handleGameState()
+
+// return error codes:
 enum ExitCode {
     SUCCESS = 0,
     TOKEN_ERROR = -1,
     COM_ERROR = -2,
     PORT_ERROR = -3,
+    NO_LOBBY_MUSIC_ID = -4,
+    NO_MVP_MUSIC_ID = -5,
+    JSON_MUSIC_LENGTH_PARSING_ERROR = -6,
 };
-*/
+
 AppSettings config;
+
+
+// JSON:
 
 bool loadSettings() {
     std::ifstream file("settings.json");
@@ -93,18 +133,29 @@ bool loadSettings() {
     try {
         json j;
         file >> j;
-
+        // volume -> int / lobby / mvp / freezeTime / roundStart
+        // fading -> int fade_duration_ms
+        // tracks: {
+        //  mvp -> uri / start_seconds / duration_seconds
+        //  freezeTime -> uri / start_seconds / duration_seconds
+        //  roundStart -> uri / start_seconds / duration_seconds
+        // }
         if (j.contains("volume") && j["volume"].is_object()) {
             auto vol = j["volume"];
-            if (vol.contains("master") && vol["master"].is_number()) {
-                config.masterVol = vol["master"].get<float>() / 100.0f;
-            }
+            
             if (vol.contains("lobby") && vol["lobby"].is_number()) {
                 config.lobbyVol = vol["lobby"].get<float>() / 100.0f;
             }
             if (vol.contains("mvp") && vol["mvp"].is_number()) {
                 config.mvpVol = vol["mvp"].get<float>() / 100.0f;
             }
+            if (vol.contains("freezeTime") && vol["freezeTime"].is_number()) {
+                config.freezeTimeVol = vol["freezeTime"].get<float>() / 100.0f;
+            }
+            if (vol.contains("roundStart") && vol["roundStart"].is_number()) {
+                config.roundStartVol = vol["roundStart"].get<float>() / 100.0f;
+            }
+
         }
 
         // fading
@@ -124,28 +175,51 @@ bool loadSettings() {
                     config.lobbyUri = lobbyNode["uri"].get<std::string>();
                 }
                 if (lobbyNode.contains("start_seconds") && lobbyNode["start_seconds"].is_number()) {
-                    config.lobbyStartMs = static_cast<int>(lobbyNode["start_seconds"].get<double>() * 1000.0);
+                    config.lobbyStartSeconds = static_cast<int>(lobbyNode["start_seconds"].get<double>() * 1000.0);
                 }
             }
 
-        // mvp
-        if (tracks.contains("mvp") && tracks["mvp"].is_object()) {
+            // mvp
+            if (tracks.contains("mvp") && tracks["mvp"].is_object()) {
             auto mvpNode = tracks["mvp"];
             if (mvpNode.contains("uri") && mvpNode["uri"].is_string()) {
                 config.mvpUri = mvpNode["uri"].get<std::string>();
             }
             if (mvpNode.contains("start_seconds") && mvpNode["start_seconds"].is_number()) {
-                config.mvpStartMs = static_cast<int>(mvpNode["start_seconds"].get<double>() * 1000.0);
+                config.mvpStartSeconds = static_cast<int>(mvpNode["start_seconds"].get<double>() * 1000.0);
             }
             if (mvpNode.contains("duration_seconds") && mvpNode["duration_seconds"].is_number()) {
                 config.mvpDurationSec = mvpNode["duration_seconds"].get<float>();
             }
         }
-    }
+            // freezeTime
+            if (tracks.contains("freezeTime") && tracks["freezeTime"].is_object()) {
+            auto freezeTimeNode = tracks["freezeTime"];
+            if (freezeTimeNode.contains("uri") && freezeTimeNode["uri"].is_string()) {
+                config.freezeTimeUri = freezeTimeNode["uri"].get<std::string>();
+            }
+            if (freezeTimeNode.contains("start_seconds") && freezeTimeNode["start_seconds"].is_number()) {
+                config.freezeTimeStartSeconds = static_cast<int>(freezeTimeNode["start_seconds"].get<double>() * 1000.0);
+            }
+        }
+
+            // roundStart
+            if (tracks.contains("roundStart") && tracks["roundStart"].is_object()) {
+            auto roundStartNode = tracks["roundStart"];
+            if (roundStartNode.contains("uri") && roundStartNode["uri"].is_string()) {
+                config.roundStartUri = roundStartNode["uri"].get<std::string>();
+            }
+            if (roundStartNode.contains("start_seconds") && roundStartNode["start_seconds"].is_number()) {
+                config.roundStartStartSeconds = static_cast<int>(roundStartNode["start_seconds"].get<double>() * 1000.0);
+            }
+            if (roundStartNode.contains("duration_seconds") && roundStartNode["duration_seconds"].is_number()) {
+                config.roundStartDurationSeconds = roundStartNode["duration_seconds"].get<float>();
+            }
+        }
+        }
 
         std::cout << "[CONFIG] Settings loaded!\n";
-        std::cout << "[CONFIG] Loaded values -> Master: " << (config.masterVol * 100)
-            << "%, Lobby: " << (config.lobbyVol * 100)
+        std::cout << "[CONFIG] Loaded values -> "<< "Lobby: " << (config.lobbyVol * 100)
             << "%, MVP: " << (config.mvpVol * 100) << "%\n";
         return true;
     }
@@ -175,6 +249,25 @@ bool loadToken() {
         return false;
     }
 }
+
+/*
+std::string getJsonStringSafe(const json& parent, const std::string& key) {
+    if (!parent.contains(key) || parent[key].is_null()) return "";
+    try {
+        if (parent[key].is_string()) return parent[key].get<std::string>();
+        if (parent[key].is_number_integer() || parent[key].is_number_unsigned()) {
+            return std::to_string(parent[key].get<uint64_t>());
+        }
+        if (parent[key].is_number_float()) {
+            return std::to_string(parent[key].get<double>());
+        }
+    }
+    catch (...) {
+        return "";
+    }
+    return "";
+}
+*/
 
 std::string base64Encode(const std::string& in) {
     DWORD outLen = 0;
@@ -240,22 +333,99 @@ bool refreshSpotifyToken() {
     return false;
 }
 
+
+// SPOTIFY API:
+
+bool sendSpotifyGet(const std::string& endpoint, std::string& responseOutput) {
+    std::string url = "https://api.spotify.com" + endpoint;
+
+    std::string command = "curl.exe -s -H \"Authorization: Bearer " + spotifyAccessToken + "\" \"" + url + "\"";
+
+#ifdef _WIN32
+    FILE* pipe = _popen(command.c_str(), "r");
+#else
+    FILE* pipe = popen(command.c_str(), "r");
+#endif
+    if (!pipe) {
+        std::cout << "[!] Couldn't open curl.exe\n";
+        return false;
+    }
+    char buffer[128];
+    responseOutput.clear();
+    while (fgets(buffer, sizeof(buffer), pipe) != nullptr) {
+        responseOutput += buffer;
+    }
+#ifdef _WIN32
+    int returnCode = _pclose(pipe);
+#else
+    int returnCode = pclose(pipe);
+#endif
+    if (returnCode != 0) {
+        std::cout << "[!] curl.exe returned an error: " << returnCode << "\n";
+        return false;
+    }
+    if (responseOutput.empty()) {
+        std::cout << "[!] curl.exe got an empty response\n";
+        return false;
+    }
+    return true;
+}
+
+ExitCode checkMusicLength(const std::string& lobbyTrack, const std::string& MVPTrack, std::atomic<int>& g_LobbyMusicDuration, std::atomic<int>& g_MVPMusicDuration /* later const std::string& TenSecondRoundStart */) {
+    // check if track ID are empty
+    if (lobbyTrack.empty()) return NO_LOBBY_MUSIC_ID;
+    if (MVPTrack.empty()) return NO_MVP_MUSIC_ID;
+
+    // checking length of lobbyTrack
+    std::string LOBBYendpoint = "/v1/tracks/" + lobbyTrack;
+    std::string LobbyLengthResponse;
+
+    if (sendSpotifyGet(LOBBYendpoint, LobbyLengthResponse)) {
+        try {
+            json jsonLOBBYlength = json::parse(LobbyLengthResponse);
+
+            // checking length of MVPTrack
+            std::string MVPendpoint = "/v1/tracks/" + MVPTrack;
+            std::string MVPLengthResponse;
+
+            g_LobbyMusicDuration.store(jsonLOBBYlength.value("duration_ms", 90000)); // if music keeps repeating after 1min 30s, that means fallback data is used (90000ms)
+            if (sendSpotifyGet(MVPendpoint, MVPLengthResponse)) {
+                try {
+                    json MVPLOBBYlength = json::parse(MVPLengthResponse);
+                    // everything okay
+                    g_MVPMusicDuration.store(MVPLOBBYlength.value("duration_ms", 10000));
+                }
+                // MVP music error
+                catch (const json::parse_error& errorMVP) {
+                    std::cout << "[!] Parsing error with MVP Music Length. Error code: " << errorMVP.what() << "\n";
+                }
+            }
+        }
+        // Lobby music error
+        catch (const json::parse_error& errorLobby) {
+            std::cout << "[!] Parsing error with Lobby Music Length. Error code: " << errorLobby.what() << "\n";
+        }
+    }
+    // any error
+    return JSON_MUSIC_LENGTH_PARSING_ERROR;
+}
+
 bool sendSpotifyPut(const std::string& endpoint, const std::string& jsonBody) {
     std::string url = "https://api.spotify.com" + endpoint;
     std::string cmd = "curl.exe -s -o NUL -w \"%{http_code}\" -X PUT \"" + url + "\" "
         "-H \"Authorization: Bearer " + spotifyAccessToken + "\" "
         "-H \"Content-Type: application/json\" ";
     if (!jsonBody.empty()) {
-
         std::string escapedBody = jsonBody;
         size_t pos = 0;
         while ((pos = escapedBody.find("\"", pos)) != std::string::npos) {
             escapedBody.replace(pos, 1, "\\\"");
             pos += 2;
-
         }
         cmd += "-d \"" + escapedBody + "\"";
-
+    }
+    else {
+        cmd += "-d \"\"";
     }
 
     FILE* pipe = _popen(cmd.c_str(), "r");
@@ -304,6 +474,11 @@ bool spotifyPlayUri(const std::string& uri, int positionMs) {
     return false;
 }
 
+void setSpotifyRepeat(const std::string& state) {
+    std::string endpoint = "/v1/me/player/repeat?state=" + state;
+    sendSpotifyPut(endpoint);
+}
+
 bool spotifyPause() {
     if (sendSpotifyPut("/v1/me/player/pause", "{}")) {
         std::cout << "[Spotify API] Playback paused.\n";
@@ -312,108 +487,33 @@ bool spotifyPause() {
     return false;
 }
 
-std::string getJsonStringSafe(const json& parent, const std::string& key) {
-    if (!parent.contains(key) || parent[key].is_null()) return "";
-    try {
-        if (parent[key].is_string()) return parent[key].get<std::string>();
-        if (parent[key].is_number_integer() || parent[key].is_number_unsigned()) {
-            return std::to_string(parent[key].get<uint64_t>());
+void fadeVolume(float startVol, float endVol, int durationMs, int targetState) {
+    std::thread([=]() {
+        bool comInitialized = false;
+        HRESULT hr = CoInitializeEx(NULL, COINIT_MULTITHREADED);
+        if (SUCCEEDED(hr)) {
+            comInitialized = true;
         }
-        if (parent[key].is_number_float()) {
-            return std::to_string(parent[key].get<double>());
+        int steps = 20;
+        int delay = durationMs / steps;
+        float stepSize = (endVol - startVol) / static_cast<float>(steps);
+
+        for (int i = 0; i <= steps; ++i) {
+            if (currentState.load() != targetState) {
+                if (comInitialized) CoUninitialize();
+                return;
+            }
+
+            float calculatedVol = startVol + (stepSize * i);
+            setSpotifyVolume(calculatedVol);
+            std::this_thread::sleep_for(std::chrono::milliseconds(delay));
         }
-    }
-    catch (...) {
-        return "";
-    }
-    return "";
+        setSpotifyVolume(endVol);
+        if (comInitialized) CoUninitialize(); // API clear
+        }).detach();
 }
 
-void handleGameState(const json& j) { // "C:\Program Files (x86)\Steam\steamapps\common\Counter-Strike Global Offensive\game\csgo\cfg\gamestate_integration_ClutchSync.cfg"
-    try {
-        if (isInLobby(j)) {
-            if (currentState != STATE_LOBBY) {
-                currentState = STATE_LOBBY;
-                std::cout << "[CS2] Lobby / menu\n";
-                spotifyPlayUri(config.lobbyUri, config.lobbyStartMs);
-                fadeVolume(currentSpotifyVolume, config.lobbyVol, config.fadeDurationMs);
-            }
-            return;
-        }
-
-        if (j.contains("round") && j["round"].is_object() && j["round"].contains("phase")) {
-            std::string roundPhase = j["round"].value("phase", "");
-
-            if (roundPhase == "freezetime") {
-                if (currentState != STATE_FREEZETIME) {
-                    currentState = STATE_FREEZETIME;
-                    std::cout << "[CS2] Shopping time -> music turned down\n";
-                    spotifyPlayUri(config.lobbyUri, config.lobbyStartMs);
-                    fadeVolume(currentSpotifyVolume, config.lobbyVol * 0.4f, 1000);
-                }
-            }
-
-            else if (roundPhase == "live") {
-                if (currentState != STATE_LIVE) {
-                    currentState = STATE_LIVE;
-                    std::cout << "[CS2] Round start -> music muted & paused\n";
-                    std::thread([=]() {
-                        fadeVolume(currentSpotifyVolume, 0.0f, 800);
-                        std::this_thread::sleep_for(std::chrono::milliseconds(800));
-                        if (currentState == STATE_LIVE) {
-                            spotifyPause();
-                        }
-                        }).detach();
-                }
-            }
-            else if (roundPhase == "over") {
-                if (currentState != STATE_OVER) {
-                    currentState = STATE_OVER;
-                    std::cout << "[CS2] End of the round -> Checking MVP / music ON\n";
-
-                    bool gotMvp = false;
-                    if (j.contains("player") && j["player"].contains("match_stats") && j["player"]["match_stats"].contains("mvps")) {
-                        int currentMvps = j["player"]["match_stats"].value("mvps", 0);
-
-                        if (j.contains("previously") && j["previously"].contains("player") &&
-                            j["previously"]["player"].contains("match_stats") &&
-                            j["previously"]["player"]["match_stats"].contains("mvps")) {
-                            int prevMvps = j["previously"]["player"]["match_stats"].value("mvps", 0);
-                            if (currentMvps > prevMvps) gotMvp = true;
-                        }
-                        else if (myLastMvpCount != -1 && currentMvps > myLastMvpCount) {
-                            gotMvp = true;
-                        }
-                        myLastMvpCount = currentMvps;
-
-                        if (gotMvp) {
-                            std::cout << "You got MVP! Playing: " << config.mvpUri << " at " << config.mvpStartMs << ".\n";
-                            setSpotifyVolume(0.0f);
-
-                            spotifyPlayUri(config.mvpUri, config.mvpStartMs);
-                            setSpotifyVolume(config.mvpVol);
-
-                            std::thread([=]() {
-                                int duration = static_cast<int>(config.mvpDurationSec * 1000);
-                                if (duration > 1000) {
-                                    std::this_thread::sleep_for(std::chrono::milliseconds(duration - 1000));
-                                }
-                                fadeVolume(config.mvpVol, 0.0f, 1000);
-                                spotifyPause();
-                                }).detach();
-                        }
-                        else {
-                            std::cout << "[CS2] Someone else got MVP...\n";
-                        }
-                    }
-                }
-            }
-        }
-    }
-    catch (const std::exception& e) {
-        std::cerr << "[!] GSI JSON exception caught: " << e.what() << "\n";
-    }
-}
+// CS2 GSI:
 
 bool isInLobby(const json& gsiData) {
     if (!gsiData.contains("map") || gsiData.value("player", json::object()).value("activity", "") == "menu") {
@@ -422,35 +522,132 @@ bool isInLobby(const json& gsiData) {
     return false;
 }
 
-void fadeVolume(float startVol, float endVol, int durationMs) {
-    std::thread([=]() {
-        HRESULT hr = CoInitializeEx(NULL, COINIT_MULTITHREADED);
-        if (FAILED(hr)) {
-            std::cerr << "[!] [FadeVolume()] CoInitializeEx failed: 0x" << std::hex << hr << std::dec << "\n";
-            int steps = 20;
-            int delay = durationMs / steps;
-            float stepSize = (endVol - startVol) / static_cast<float>(steps);
-            for (int i = 0; i <= steps; ++i) {
-                float calculatedVol = startVol + (stepSize * i);
-                setSpotifyVolume(calculatedVol);
-                std::this_thread::sleep_for(std::chrono::milliseconds(delay));
+void handleGameState(const json& j) { // "C:\Program Files (x86)\Steam\steamapps\common\Counter-Strike Global Offensive\game\csgo\cfg\gamestate_integration_ClutchSync.cfg"
+    try {
+        
+        // music duration
+        /*
+        std::thread(checkMusicLength, config.lobbyUri, config.mvpUri, std::ref(g_LobbyMusicDuration), std::ref(g_MVPMusicDuration)).detach();
+        */
+
+        if (isInLobby(j)) {
+            if (currentState != STATE_LOBBY) {
+                currentState.store(STATE_LOBBY);
+                std::cout << "[CS2] Lobby / menu\n";
+                setSpotifyRepeat("track");
+                spotifyPlayUri(config.lobbyUri, config.lobbyStartSeconds);
+                fadeVolume(currentSpotifyVolume.load(), config.lobbyVol, config.fadeDurationMs, STATE_LOBBY);
             }
-            setSpotifyVolume(endVol);
             return;
         }
-        int steps = 20;
-        int delay = durationMs / steps;
-        float stepSize = (endVol - startVol) / static_cast<float>(steps);
 
-        for (int i = 0; i <= steps; ++i) {
-            float calculatedVol = startVol + (stepSize * i);
-            setSpotifyVolume(calculatedVol);
-            std::this_thread::sleep_for(std::chrono::milliseconds(delay));
+        if (j.contains("round") && j["round"].is_object() && j["round"].contains("phase")) {
+            std::string roundPhase = j["round"].value("phase", "");
+
+            if (roundPhase == "freezetime") {
+                if (currentState.load() != STATE_FREEZETIME) {
+                    currentState.store(STATE_FREEZETIME);
+                    std::cout << "[CS2][STATE_FREEZETIME] Shopping time.\n";
+                    spotifyPlayUri(config.freezeTimeUri, config.freezeTimeStartSeconds);
+                    setSpotifyRepeat("track");
+                    fadeVolume(currentSpotifyVolume.load(), config.lobbyVol * 0.4f, config.fadeDurationMs, STATE_FREEZETIME);
+                }
+            }
+            else if (roundPhase == "live") {
+                if (currentState.load() != STATE_LIVE) {
+                    bool cameFromFreeze = (lastRoundPhase == "freezetime");
+                    currentState.store(STATE_LIVE);
+
+                    if (cameFromFreeze) {
+                        std::cout << "[CS2] Round start -> Playing roundStart music/\n";
+                        std::thread([=]() {  // roundStart music when round starts
+                            spotifyPlayUri(config.roundStartUri, config.roundStartStartSeconds);
+                            setSpotifyVolume(config.roundStartVol);
+
+                            int roundStartMusicDuration = static_cast<int>(config.roundStartDurationSeconds * 1000.0f);
+                            std::this_thread::sleep_for(std::chrono::milliseconds(roundStartMusicDuration));
+
+                            fadeVolume(config.roundStartVol, 0.0f, config.fadeDurationMs, STATE_LIVE);
+                            std::this_thread::sleep_for(std::chrono::milliseconds(config.fadeDurationMs));
+                            if (currentState.load() == STATE_LIVE) {
+                                spotifyPause();
+                            }
+                        }).detach();
+                    }
+                    else {
+                        std::cout << "[CS2] Round start (mid-game join) -> music muted & paused\n";
+                        std::thread([=]() {
+                            fadeVolume(currentSpotifyVolume.load(), 0.0f, config.fadeDurationMs, STATE_LIVE);
+                            std::this_thread::sleep_for(std::chrono::milliseconds(config.fadeDurationMs));
+                            if (currentState == STATE_LIVE) {
+                                spotifyPause();
+                            }
+                        }).detach();
+                    }
+                }
+            }
+            else if (roundPhase == "over") {
+                if (currentState != STATE_OVER) {
+                    currentState = STATE_OVER;
+                    std::cout << "[CS2] End of the round -> Checking MVP...\n";
+
+                    bool gotMvp = false;
+
+                    std::string mySteamID = "";
+                    if (j.contains("provider") && j["provider"].contains("steamid")) {
+                        mySteamID = j["provider"].value("steamid", "");
+                    }
+                    if (j.contains("player") && j["player"].is_object()) {
+                        std::string playerSteamID = j["player"].value("steamid", "");
+
+                        if (playerSteamID == mySteamID && j["player"].contains("match_stats")) {
+                            int currentMvps = j["player"]["match_stats"].value("mvps", 0);
+
+                            if (myLastMvpCount != -1 && currentMvps > myLastMvpCount) {
+                                gotMvp = true;
+                            }
+                            myLastMvpCount = currentMvps;
+                        }
+                    }
+                    if (gotMvp) {
+                        std::cout << "[CS2] You got MVP! Playing: " << config.mvpUri << ".\n";
+                        setSpotifyVolume(0.0f);
+                        spotifyPlayUri(config.mvpUri, config.mvpStartSeconds);
+                        setSpotifyVolume(config.mvpVol);
+
+                        std::thread([=]() {
+                            int duration = static_cast<int>(config.mvpDurationSec * 1000);
+
+                            if (duration > config.fadeDurationMs) {
+                                std::this_thread::sleep_for(std::chrono::milliseconds(duration - config.fadeDurationMs));
+                            }
+
+                            if (currentState.load() == STATE_OVER) {
+                                fadeVolume(config.mvpVol, 0.0f, config.fadeDurationMs, STATE_OVER);
+                                if (currentState.load() == STATE_OVER) {
+                                    spotifyPause();
+                                }
+                            }
+                                
+                        }).detach();
+                    }
+                }
+                else {
+                    std::cout << "[CS2] Someone else got MVP...\n";
+                }
+            }
+            if (!roundPhase.empty()) {
+                lastRoundPhase = roundPhase;
+            }
         }
-        setSpotifyVolume(endVol);
-        CoUninitialize(); // API clear
-        }).detach();
+    } catch (const std::exception& e) {
+        std::cerr << "[!] GSI JSON exception caught: " << e.what() << "\n";
+    }
 }
+
+
+
+// WINDOWS & SPOTIFY APP:
 
 bool checkSpotifyProcess(DWORD processId = 0) { // program start check
     bool exists = false;
@@ -471,6 +668,31 @@ bool checkSpotifyProcess(DWORD processId = 0) { // program start check
         CloseHandle(hSnapshot);
     }
     return exists;
+}
+
+void checkAndStartSpotify() {
+    if (checkSpotifyProcess()) return;
+    std::cout << "[!] Spotify is not running. Do you want to launch it? (Y/n): ";
+    std::string input;
+    std::getline(std::cin, input);
+
+    size_t first = input.find_first_not_of(" \t\n\r");
+    if (first != std::string::npos) {
+        size_t last = input.find_last_not_of(" \t\n\r");
+        input = input.substr(first, (last - first + 1));
+    }
+    else {
+        input.clear();
+    }
+
+    if (input.empty() || std::tolower(static_cast<unsigned char>(input[0])) == 'y') {
+        std::cout << "[i] Launching spotify...\n";
+        ShellExecuteW(NULL, L"open", L"spotify:", NULL, NULL, SW_SHOW);
+        std::this_thread::sleep_for(std::chrono::milliseconds(3000));
+    }
+    else {
+        std::cout << "[i] Skipping...\n";
+    }
 }
 
 float setSpotifyVolume(float newVolume) {
@@ -537,30 +759,8 @@ float setSpotifyVolume(float newVolume) {
     return previousVolume;
 }
 
-void checkAndStartSpotify() {
-    if (checkSpotifyProcess()) return;
-    std::cout << "[!] Spotify is not running. Do you want to launch it? (Y/n): ";
-    std::string input;
-    std::getline(std::cin, input);
 
-    size_t first = input.find_first_not_of(" \t\n\r");
-    if (first != std::string::npos) {
-        size_t last = input.find_last_not_of(" \t\n\r");
-        input = input.substr(first, (last - first + 1));
-    }
-    else {
-        input.clear();
-    }
-
-    if (input.empty() || std::tolower(static_cast<unsigned char>(input[0])) == 'y') {
-        std::cout << "[i] Launching spotify...\n";
-        ShellExecuteW(NULL, L"open", L"spotify:", NULL, NULL, SW_SHOW);
-        std::this_thread::sleep_for(std::chrono::milliseconds(3000));
-    }
-    else {
-        std::cout << "[i] Skipping...\n";
-    }
-}
+// SERVER & CONSOLE HANDLER & INT MAIN():
 
 bool startServer() { // GSI server
     httplib::Server svr;
@@ -571,7 +771,7 @@ bool startServer() { // GSI server
             std::lock_guard<std::mutex> lock(gsiMutex);
             handleGameState(j);
         }
-        catch (const std::exception& e) {}
+        catch (const std::exception& e) { std::cout << "[!] JSON Parsing error code: " << e.what() << " \n"; }
         res.status = 200;
         res.set_content("OK", "text/plain");
         });
@@ -587,7 +787,7 @@ bool startServer() { // GSI server
 BOOL WINAPI consoleHandler(DWORD signal) {
     if (signal == CTRL_CLOSE_EVENT || signal == CTRL_C_EVENT || signal == CTRL_LOGOFF_EVENT || signal == CTRL_SHUTDOWN_EVENT) {
         std::cout << "\n[!] Cleanup: Restoring original Spotify volume (" << (originalSpotifyVolume * 100.0f) << "%)...\n";
-        CoInitializeEx(NULL, COINITBASE_MULTITHREADED);
+        (void)CoInitializeEx(NULL, COINITBASE_MULTITHREADED);
         setSpotifyVolume(originalSpotifyVolume);
         std::this_thread::sleep_for(std::chrono::milliseconds(150));
         CoUninitialize();
@@ -605,10 +805,10 @@ int main()
         system("pause");
         return -2;
     }
-
     SetConsoleCtrlHandler(consoleHandler, TRUE);
 
     loadSettings();
+    
     if (!loadToken()) {
         std::cerr << "[!] Error with token read.\n";
         CoUninitialize();
@@ -627,6 +827,7 @@ int main()
         CoUninitialize();
         return -3;
     }
+
     CoUninitialize();
     return 0;
 }
