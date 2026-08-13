@@ -71,7 +71,16 @@ This is required for the program to read game events.
 * **`duration_seconds`** - How long the track should play before stopping (recommended default setting).
 * **`volume`** - Percentage for specific game states.
 * **`fading_duration_ms`** - Audio transition time in milliseconds (recommended default setting).
-  
+
+##### **🎮 Important Game Settings**
+
+To avoid audio overlapping between **Counter-Strike 2** and **ClutchSync**, configure your in-game sound settings (`Settings -> Audio -> Sound`):
+* **Mute In-Game Music Tracks:** Set volume to **0%** for **Round Start Music**, **MVP Music**, and **Main Menu Music**.
+* **Listening to other players' MVP tracks:** If you want to hear other players' MVP kits in-game and yours from ClutchSync, select the **Default Counter-Strike Music Kit** instead of completely muting MVP volume. This prevents hearing both ClutchSync's MVP track and your own in-game kit simultaneously.
+* **Using an In-Game Music Kit:** If you prefer using your standard CS2 Music Kit for MVPs, set `"volume"` under `"mvp"` to `0` inside `settings.json`.
+
+> **Note:** GSI events for MVPs may not trigger reliably during local Bot Matches (`Practice` mode). Test MVP functionality on official or community servers.
+
 ##### **How to get Spotify URIs:**
 
 To configure custom tracks or playlists for specific events, you need to use **Spotify URIs** (e.g, `spotify:track:6zfT9uWmfX4YVXq3MU93dH`)
@@ -84,5 +93,5 @@ To configure custom tracks or playlists for specific events, you need to use **S
 
 * **API returns `404 Not Found` error?**
   Spotify Web API requires an active playback session. If you get a `404` error on startup, simply click and play any song for a second in your Spotify App to wake up active device, then launch **ClutchSync** again.
-  
+
 Have fun!
