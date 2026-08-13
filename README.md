@@ -80,4 +80,9 @@ To configure custom tracks or playlists for specific events, you need to use **S
 * Take the ID between `/track/` and `?` (e.g., `01234567890ABCDEFGHIJK`)** and prefix it with `spotify:track:`
 * It should look like this: `spotify:track:01234567890ABCDEFGHIJK`.
 
+##### **❓ Troubleshooting**
+
+* **API returns `404 Not Found` error?**
+  Spotify Web API requires an active playback session. If you get a `404` error on startup, simply click and play any song for a second in your Spotify App to wake up active device, then launch **ClutchSync** again.
+  
 Have fun!
