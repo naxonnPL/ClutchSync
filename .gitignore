@@ -9,8 +9,5 @@ x86/
 *.exe
 *.user
 *.pdb
-*.vcxproj.filters
-*.vcxproj
-*.slnx
-ClutchSync.slngit ix
+*.vcxproj.user
 gamestate_integration_ClutchSync.cfg

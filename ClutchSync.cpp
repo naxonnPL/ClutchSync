@@ -8,6 +8,8 @@
 // windows
 #define WIN32_LEAN_AND_MEAN
 
+#pragma warning(push,0)
+
 #include <WinSock2.h> // windows sockets
 #include <windows.h> // windows API
 #include <shellapi.h> // windows shell
@@ -37,6 +39,10 @@
 #pragma comment(lib, "Ws2_32.lib")
 #pragma comment(lib, "Crypt32.lib")
 
+#pragma warning(pop)
+
+/* -------------------------------------------------------------------------------- */
+
 using json = nlohmann::json;
 std::mutex gsiMutex;
 
@@ -63,8 +69,8 @@ std::atomic<int> g_MVPMusicDuration{ 0 }; // data from ExitCode checkMusicLength
 
 // Default settings if settings.json won't work
 struct AppSettings { // default
-    // volume
 
+    // volume
     float lobbyVol = 0.6f;
     float mvpVol = 1.0f;
     float freezeTimeVol = 0.3f;
@@ -75,20 +81,20 @@ struct AppSettings { // default
 
     // lobby
     std::string lobbyUri = "spotify:track:1YTvnpDmqBAgld6hOjNEN1";
-    int lobbyStartSeconds = 0;
+    int lobbyStartMilliseconds = 0;
 
     // mvp
     std::string mvpUri = "spotify:track:6zfT9uWmfX4YVXq3MU93dH";
-    int mvpStartSeconds = 15500;
-    float mvpDurationSec = 6.0f;
+    int mvpStartMilliseconds = 15500;
+    float mvpDurationSeconds = 6.0f;
 
     // freezeTime
     std::string freezeTimeUri = "spotify:track:4Fv6wNYUixnYkj3Dgfrls8";
-    int freezeTimeStartSeconds = 15000;
+    int freezeTimeStartMilliseconds = 15000;
 
     // roundStart
     std::string roundStartUri = "spotify:track:53AkM8aF3lSu1nShMOj418";
-    int roundStartStartSeconds = 10200;
+    int roundStartStartMilliseconds = 10200;
     float roundStartDurationSeconds = 5.0f;
 };
 
@@ -117,18 +123,56 @@ enum ExitCode {
     NO_LOBBY_MUSIC_ID = -4,
     NO_MVP_MUSIC_ID = -5,
     JSON_MUSIC_LENGTH_PARSING_ERROR = -6,
+
+    // FOR TOKEN.JSON
+    NO_TOKEN_JSON = -7,
+    NO_SPOTIFY_ID_TOKEN = -8,
+    JSON_TOKEN_PARSING_ERROR = -9,
+
+    // FOR SETTINGS.JSON
+    NO_SETTINGS_JSON = -10,
+    JSON_SETTINGS_PARSING_ERROR = -11,
+
+    VOLUME_CONFIG_ERROR = -12,
+    VOLUME_LOBBY_ERROR = -13,
+    VOLUME_MVP_ERROR = -14,
+    VOLUME_FREEZETIME_ERROR = -15,
+    VOLUME_ROUNDSTART_ERROR = -16,
+
+    FADING_CONFIG_ERROR = -17,
+    FADE_DURATION_MS_ERROR = -18,
+
+    TRACKS_CONFIG_ERROR = -19,
+
+    TRACKS_LOBBY_CONFIG_ERROR = -20,
+    TRACKS_LOBBY_URI_ERROR = -21,
+    TRACKS_LOBBY_START_SECONDS_ERROR = -22,
+
+    TRACKS_MVP_CONFIG_ERROR = -23,
+    TRACKS_MVP_URI_ERROR = -24,
+    TRACKS_MVP_START_SECONDS_ERROR = -25,
+    TRACKS_MVP_DURATION_SECONDS_ERROR = -26,
+
+    TRACKS_FREEZETIME_CONFIG_ERROR = -27,
+    TRACKS_FREEZETIME_URI_ERROR = -28,
+    TRACKS_FREEZETIME_START_SECONDS_ERROR = -29,
+
+    TRACKS_ROUNDSTART_CONFIG_ERROR = -30,
+    TRACKS_ROUNDSTART_URI_ERROR = -31,
+    TRACKS_ROUNDSTART_START_SECONDS_ERROR = -32,
+    TRACKS_ROUNDSTART_DURATION_SECONDS_ERROR = -33,
+
 };
 
 AppSettings config;
 
-
 // JSON:
 
-bool loadSettings() {
+ExitCode loadSettings() {
     std::ifstream file("settings.json");
     if (!file.is_open()) {
         std::cout << "[CONFIG] Config settings.json not found! Loading defaults...\n";
-        return false;
+        return NO_SETTINGS_JSON;
     }
     try {
         json j;
@@ -146,25 +190,35 @@ bool loadSettings() {
             if (vol.contains("lobby") && vol["lobby"].is_number()) {
                 config.lobbyVol = vol["lobby"].get<float>() / 100.0f;
             }
+            else { return VOLUME_LOBBY_ERROR; }
+
             if (vol.contains("mvp") && vol["mvp"].is_number()) {
                 config.mvpVol = vol["mvp"].get<float>() / 100.0f;
             }
+            else { return VOLUME_MVP_ERROR; }
+
             if (vol.contains("freezeTime") && vol["freezeTime"].is_number()) {
                 config.freezeTimeVol = vol["freezeTime"].get<float>() / 100.0f;
-            }
+            } 
+            else { return VOLUME_FREEZETIME_ERROR; }
+
             if (vol.contains("roundStart") && vol["roundStart"].is_number()) {
                 config.roundStartVol = vol["roundStart"].get<float>() / 100.0f;
-            }
+            } 
+            else { return VOLUME_ROUNDSTART_ERROR; }
 
-        }
+        } else { return VOLUME_CONFIG_ERROR; }
 
         // fading
         if (j.contains("fading") && j["fading"].is_object()) {
             auto fading = j["fading"];
             if (fading.contains("fade_duration_ms") && fading["fade_duration_ms"].is_number_integer()) {
                 config.fadeDurationMs = fading["fade_duration_ms"].get<int>();
-            }
-        }
+            } 
+            else { return FADE_DURATION_MS_ERROR; } 
+
+        } else { return FADING_CONFIG_ERROR; }
+
         // lobby
         if (j.contains("tracks") && j["tracks"].is_object()) {
             auto tracks = j["tracks"];
@@ -174,79 +228,106 @@ bool loadSettings() {
                 if (lobbyNode.contains("uri") && lobbyNode["uri"].is_string()) {
                     config.lobbyUri = lobbyNode["uri"].get<std::string>();
                 }
+                else { return TRACKS_LOBBY_URI_ERROR; }
+
                 if (lobbyNode.contains("start_seconds") && lobbyNode["start_seconds"].is_number()) {
-                    config.lobbyStartSeconds = static_cast<int>(lobbyNode["start_seconds"].get<double>() * 1000.0);
+                    config.lobbyStartMilliseconds = static_cast<int>(lobbyNode["start_seconds"].get<double>() * 1000.0);
                 }
+                else { return TRACKS_LOBBY_START_SECONDS_ERROR; }
+
             }
+            else { return TRACKS_LOBBY_CONFIG_ERROR; }
 
             // mvp
             if (tracks.contains("mvp") && tracks["mvp"].is_object()) {
-            auto mvpNode = tracks["mvp"];
-            if (mvpNode.contains("uri") && mvpNode["uri"].is_string()) {
-                config.mvpUri = mvpNode["uri"].get<std::string>();
-            }
-            if (mvpNode.contains("start_seconds") && mvpNode["start_seconds"].is_number()) {
-                config.mvpStartSeconds = static_cast<int>(mvpNode["start_seconds"].get<double>() * 1000.0);
-            }
-            if (mvpNode.contains("duration_seconds") && mvpNode["duration_seconds"].is_number()) {
-                config.mvpDurationSec = mvpNode["duration_seconds"].get<float>();
-            }
-        }
+                auto mvpNode = tracks["mvp"];
+                if (mvpNode.contains("uri") && mvpNode["uri"].is_string()) {
+                    config.mvpUri = mvpNode["uri"].get<std::string>();
+                }
+                else { return TRACKS_MVP_URI_ERROR; }
+
+                if (mvpNode.contains("start_seconds") && mvpNode["start_seconds"].is_number()) {
+                    config.mvpStartMilliseconds = static_cast<int>(mvpNode["start_seconds"].get<double>() * 1000.0);
+                }
+                else { return TRACKS_MVP_START_SECONDS_ERROR; }
+
+                if (mvpNode.contains("duration_seconds") && mvpNode["duration_seconds"].is_number()) {
+                    config.mvpDurationSeconds = mvpNode["duration_seconds"].get<float>();
+                }
+                else { return TRACKS_MVP_DURATION_SECONDS_ERROR; }
+
+            } else { return TRACKS_MVP_CONFIG_ERROR; }
+
             // freezeTime
             if (tracks.contains("freezeTime") && tracks["freezeTime"].is_object()) {
-            auto freezeTimeNode = tracks["freezeTime"];
-            if (freezeTimeNode.contains("uri") && freezeTimeNode["uri"].is_string()) {
-                config.freezeTimeUri = freezeTimeNode["uri"].get<std::string>();
+                auto freezeTimeNode = tracks["freezeTime"];
+                if (freezeTimeNode.contains("uri") && freezeTimeNode["uri"].is_string()) {
+                    config.freezeTimeUri = freezeTimeNode["uri"].get<std::string>();
+                }
+                else { return TRACKS_FREEZETIME_URI_ERROR; }
+
+                if (freezeTimeNode.contains("start_seconds") && freezeTimeNode["start_seconds"].is_number()) {
+                    config.freezeTimeStartMilliseconds = static_cast<int>(freezeTimeNode["start_seconds"].get<double>() * 1000.0);
+                }
+                else { return TRACKS_FREEZETIME_START_SECONDS_ERROR; }
+
             }
-            if (freezeTimeNode.contains("start_seconds") && freezeTimeNode["start_seconds"].is_number()) {
-                config.freezeTimeStartSeconds = static_cast<int>(freezeTimeNode["start_seconds"].get<double>() * 1000.0);
-            }
-        }
+            else { return TRACKS_FREEZETIME_CONFIG_ERROR; }
 
             // roundStart
             if (tracks.contains("roundStart") && tracks["roundStart"].is_object()) {
-            auto roundStartNode = tracks["roundStart"];
-            if (roundStartNode.contains("uri") && roundStartNode["uri"].is_string()) {
-                config.roundStartUri = roundStartNode["uri"].get<std::string>();
-            }
-            if (roundStartNode.contains("start_seconds") && roundStartNode["start_seconds"].is_number()) {
-                config.roundStartStartSeconds = static_cast<int>(roundStartNode["start_seconds"].get<double>() * 1000.0);
-            }
-            if (roundStartNode.contains("duration_seconds") && roundStartNode["duration_seconds"].is_number()) {
-                config.roundStartDurationSeconds = roundStartNode["duration_seconds"].get<float>();
-            }
+                auto roundStartNode = tracks["roundStart"];
+                if (roundStartNode.contains("uri") && roundStartNode["uri"].is_string()) {
+                    config.roundStartUri = roundStartNode["uri"].get<std::string>();
+                }
+                else { return TRACKS_ROUNDSTART_URI_ERROR; }
+
+                if (roundStartNode.contains("start_seconds") && roundStartNode["start_seconds"].is_number()) {
+                    config.roundStartStartMilliseconds = static_cast<int>(roundStartNode["start_seconds"].get<double>() * 1000.0);
+                }
+                else { return TRACKS_ROUNDSTART_START_SECONDS_ERROR; }
+
+                if (roundStartNode.contains("duration_seconds") && roundStartNode["duration_seconds"].is_number()) {
+                    config.roundStartDurationSeconds = roundStartNode["duration_seconds"].get<float>();
+                }
+                else { return TRACKS_ROUNDSTART_DURATION_SECONDS_ERROR; }
+
+            } else { return TRACKS_ROUNDSTART_CONFIG_ERROR; }
         }
-        }
+        else { return TRACKS_CONFIG_ERROR; }
 
         std::cout << "[CONFIG] Settings loaded!\n";
         std::cout << "[CONFIG] Loaded values -> "<< "Lobby: " << (config.lobbyVol * 100)
-            << "%, MVP: " << (config.mvpVol * 100) << "%\n";
-        return true;
+                  << "%, MVP: " << (config.mvpVol * 100) << "%\n";
+        return SUCCESS;
     }
     catch (const std::exception& e) {
         std::cerr << "[!] Error parsing settings.json: " << e.what() << "Using defaults.\n";
-        return false;
+        return JSON_SETTINGS_PARSING_ERROR;
     }
 }
 
-bool loadToken() {
+ExitCode loadToken() {
     std::ifstream f("token.json");
     if (!f.is_open()) {
-        std::cerr << "[!] No token.json file found!" << std::endl;
-        return false;
+        std::cerr << "[!] No token.json file found!\n";
+        return NO_TOKEN_JSON;
     }
-
     try {
         json data = json::parse(f);
         spotifyClientId = data.value("client_id", "");
         spotifyClientSecret = data.value("client_secret", "");
         spotifyAccessToken = data.value("spotify_token", "");
         spotifyRefreshToken = data.value("refresh_token", "");
-        return true;
+        if (spotifyClientId == "PUT_HERE_CLIENT_ID" || spotifyClientSecret == "PUT_HERE_CLIENT_SECRET" || spotifyRefreshToken == "PUT_HERE_REFRESH_TOKEN" || spotifyAccessToken == "PUT_HERE_SPOTIFY_TOKEN") {
+            std::cout << "You didn't paste all your Spotify Token ID's. Read README.md. ClutchSync won't work without it.\nYou must have Spotify Premium.\n";
+            return NO_SPOTIFY_ID_TOKEN;
+        }
+        return SUCCESS;
     }
     catch (const std::exception& e) {
-        std::cerr << "[!] JSON parse error: " << e.what() << std::endl;
-        return false;
+        std::cerr << "[!] JSON parse error: " << e.what() << "\n";
+        return JSON_TOKEN_PARSING_ERROR;
     }
 }
 
@@ -391,9 +472,10 @@ ExitCode checkMusicLength(const std::string& lobbyTrack, const std::string& MVPT
             g_LobbyMusicDuration.store(jsonLOBBYlength.value("duration_ms", 90000)); // if music keeps repeating after 1min 30s, that means fallback data is used (90000ms)
             if (sendSpotifyGet(MVPendpoint, MVPLengthResponse)) {
                 try {
-                    json MVPLOBBYlength = json::parse(MVPLengthResponse);
+                    json MVPlength = json::parse(MVPLengthResponse);
                     // everything okay
-                    g_MVPMusicDuration.store(MVPLOBBYlength.value("duration_ms", 10000));
+                    g_MVPMusicDuration.store(MVPlength.value("duration_ms", 10000));
+                    return SUCCESS;
                 }
                 // MVP music error
                 catch (const json::parse_error& errorMVP) {
@@ -513,6 +595,7 @@ void fadeVolume(float startVol, float endVol, int durationMs, int targetState) {
         }).detach();
 }
 
+
 // CS2 GSI:
 
 bool isInLobby(const json& gsiData) {
@@ -535,7 +618,7 @@ void handleGameState(const json& j) { // "C:\Program Files (x86)\Steam\steamapps
                 currentState.store(STATE_LOBBY);
                 std::cout << "[CS2] Lobby / menu\n";
                 setSpotifyRepeat("track");
-                spotifyPlayUri(config.lobbyUri, config.lobbyStartSeconds);
+                spotifyPlayUri(config.lobbyUri, config.lobbyStartMilliseconds);
                 fadeVolume(currentSpotifyVolume.load(), config.lobbyVol, config.fadeDurationMs, STATE_LOBBY);
             }
             return;
@@ -548,7 +631,7 @@ void handleGameState(const json& j) { // "C:\Program Files (x86)\Steam\steamapps
                 if (currentState.load() != STATE_FREEZETIME) {
                     currentState.store(STATE_FREEZETIME);
                     std::cout << "[CS2][STATE_FREEZETIME] Shopping time.\n";
-                    spotifyPlayUri(config.freezeTimeUri, config.freezeTimeStartSeconds);
+                    spotifyPlayUri(config.freezeTimeUri, config.freezeTimeStartMilliseconds);
                     setSpotifyRepeat("track");
                     fadeVolume(currentSpotifyVolume.load(), config.lobbyVol * 0.4f, config.fadeDurationMs, STATE_FREEZETIME);
                 }
@@ -561,7 +644,7 @@ void handleGameState(const json& j) { // "C:\Program Files (x86)\Steam\steamapps
                     if (cameFromFreeze) {
                         std::cout << "[CS2] Round start -> Playing roundStart music/\n";
                         std::thread([=]() {  // roundStart music when round starts
-                            spotifyPlayUri(config.roundStartUri, config.roundStartStartSeconds);
+                            spotifyPlayUri(config.roundStartUri, config.roundStartStartMilliseconds);
                             setSpotifyVolume(config.roundStartVol);
 
                             int roundStartMusicDuration = static_cast<int>(config.roundStartDurationSeconds * 1000.0f);
@@ -612,11 +695,11 @@ void handleGameState(const json& j) { // "C:\Program Files (x86)\Steam\steamapps
                     if (gotMvp) {
                         std::cout << "[CS2] You got MVP! Playing: " << config.mvpUri << ".\n";
                         setSpotifyVolume(0.0f);
-                        spotifyPlayUri(config.mvpUri, config.mvpStartSeconds);
+                        spotifyPlayUri(config.mvpUri, config.mvpStartMilliseconds);
                         setSpotifyVolume(config.mvpVol);
 
                         std::thread([=]() {
-                            int duration = static_cast<int>(config.mvpDurationSec * 1000);
+                            int duration = static_cast<int>(config.mvpDurationSeconds * 1000);
 
                             if (duration > config.fadeDurationMs) {
                                 std::this_thread::sleep_for(std::chrono::milliseconds(duration - config.fadeDurationMs));
@@ -644,7 +727,6 @@ void handleGameState(const json& j) { // "C:\Program Files (x86)\Steam\steamapps
         std::cerr << "[!] GSI JSON exception caught: " << e.what() << "\n";
     }
 }
-
 
 
 // WINDOWS & SPOTIFY APP:
@@ -698,7 +780,7 @@ void checkAndStartSpotify() {
 float setSpotifyVolume(float newVolume) {
     newVolume = std::clamp(newVolume, 0.0f, 1.0f);
     float previousVolume = currentSpotifyVolume;
-    bool success = false;
+
 
     IMMDeviceEnumerator* pEnumerator = NULL;
     IMMDevice* pDevice = NULL;
@@ -798,23 +880,31 @@ BOOL WINAPI consoleHandler(DWORD signal) {
 
 int main()
 {
-    std::cout << "=== Music for CS2 ===\n";
+    std::cout << "=== ClutchSync by naxonn ===\n";
     HRESULT hr = CoInitializeEx(NULL, COINIT_MULTITHREADED);
     if (FAILED(hr)) {
         std::cerr << "[!] Error: Couldn't initialize COM library.\n";
         system("pause");
-        return -2;
+        return COM_ERROR;
     }
     SetConsoleCtrlHandler(consoleHandler, TRUE);
 
-    loadSettings();
-    
-    if (!loadToken()) {
-        std::cerr << "[!] Error with token read.\n";
+    ExitCode loadSettingsStatus = loadSettings();
+    if (loadSettingsStatus != SUCCESS) {
+        std::cerr << "Error code: " << loadSettingsStatus << ".\n";
+        config = AppSettings();
+    }
+
+    std::cout << "settings.json loaded.\n";
+    ExitCode loadTokenStatus = loadToken();
+    if (loadTokenStatus != SUCCESS) {
+        std::cerr << "[!] Error with token read.\nError code: " << loadTokenStatus << ".\n";
         CoUninitialize();
         system("pause");
-        return -1;
+        return loadTokenStatus;
     }
+    std::cout << "token.json loaded.\n";
+
     checkAndStartSpotify();
 
     std::this_thread::sleep_for(std::chrono::milliseconds(1000));
@@ -825,7 +915,7 @@ int main()
     if (!startServer()) {
         std::cerr << "[!] Port error! Read warning.\n";
         CoUninitialize();
-        return -3;
+        return PORT_ERROR;
     }
 
     CoUninitialize();

@@ -1,0 +1,7 @@
+<Solution>
+  <Configurations>
+    <Platform Name="x64" />
+    <Platform Name="x86" />
+  </Configurations>
+  <Project Path="ClutchSync.vcxproj" Id="ceda723f-e013-4c04-befc-78c2031725f5" />
+</Solution>
