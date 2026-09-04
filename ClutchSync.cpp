@@ -965,5 +965,6 @@ int main()
     }
 
     CoUninitialize();
+    return SUCCESS;
 }
 
