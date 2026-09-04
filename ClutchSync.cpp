@@ -5,40 +5,12 @@
 // [!] - error
 // [CS2] - CS2 info / status
 
-// windows
-#define WIN32_LEAN_AND_MEAN
-
 #pragma warning(push,0)
 
-#include <WinSock2.h> // windows sockets
-#include <windows.h> // windows API
-#include <shellapi.h> // windows shell
-#include <wincrypt.h> // encryption for Spotify API
-#include <tlhelp32.h>
-#include <mmdeviceapi.h> // multimedia devices
-#include <audiopolicy.h> // audio
+#include "pch.hpp"
 
-// C++ standard library
-#include <fstream> // files (e.g. settings.json and token.json)
-#include <iostream> // input/output
-#include <string> // 
-#include <algorithm>
-#include <cwchar> // wide characters for windows API
-#include <thread> // multithreading for multiple functions to work simultaneously
-#include <chrono> // time
-#include <mutex>
-#include <atomic> // multi thread safety
-#include <cstdio> // FILE, _popen/popen/_pclose/pclose for curl.exe (used in sendSpotifyGet())
-
-// third party library
-#include "httplib.h"
-#include "json.hpp" // nlohmann json
-
-#pragma comment(lib, "Ole32.lib")
-#pragma comment(lib,"Shell32.lib")
-#pragma comment(lib, "Ws2_32.lib")
-#pragma comment(lib, "Crypt32.lib")
-
+// simple debug function
+// #include "debug.hpp"
 #pragma warning(pop)
 
 /* -------------------------------------------------------------------------------- */
@@ -107,7 +79,7 @@ enum GameState {
     STATE_OVER
 };
 std::atomic<GameState> currentState{ STATE_UNKNOWN };
-
+std::atomic<bool> wasItUsed{ false }; // wont pause the music if program not used
 
 float originalSpotifyVolume = 1.0f; // to restore the volume level from before the program was launched
 std::atomic<float> currentSpotifyVolume{1.0f};
@@ -166,12 +138,14 @@ enum ExitCode {
 
 AppSettings config;
 
+
+/* -------------------------------------------------------------------------------- */
 // JSON:
 
 ExitCode loadSettings() {
     std::ifstream file("settings.json");
     if (!file.is_open()) {
-        std::cout << "[!] Config settings.json not found! Loading defaults...\n";
+        std::cout << RED << "[!] Config settings.json not found! Loading defaults...\n" << RESET;
         return NO_SETTINGS_JSON;
     }
     try {
@@ -296,13 +270,13 @@ ExitCode loadSettings() {
         }
         else { return TRACKS_CONFIG_ERROR; }
 
-        std::cout << "[CONFIG] Settings loaded!\n";
-        std::cout << "[CONFIG] Loaded volume -> " << "Lobby: " << (config.lobbyVol * 100)
+        std::cout << CYAN << "[CONFIG] " << RESET << "Settings loaded!\n";
+        std::cout << CYAN << "[CONFIG] " << RESET << "Loaded volume -> " << "Lobby: " << (config.lobbyVol * 100)
                   << "%, MVP: " << (config.mvpVol * 100) << "%, FreezeTime: " << (config.freezeTimeVol * 100) << "%, and RoundStart: " << (config.roundStartVol * 100) << "%\n";
         return SUCCESS;
     }
     catch (const std::exception& e) {
-        std::cerr << "[!] Error parsing settings.json: " << e.what() << "Using defaults.\n";
+        std::cerr << RED << "[!] Error parsing settings.json: " << RESET << e.what() << "Using defaults.\n";
         return JSON_SETTINGS_PARSING_ERROR;
     }
 }
@@ -310,7 +284,7 @@ ExitCode loadSettings() {
 ExitCode loadToken() {
     std::ifstream f("token.json");
     if (!f.is_open()) {
-        std::cerr << "[!] No token.json file found!\n";
+        std::cerr << RED << "[!] No token.json file found!\n" << RESET;
         return NO_TOKEN_JSON;
     }
     try {
@@ -320,13 +294,13 @@ ExitCode loadToken() {
         spotifyAccessToken = data.value("spotify_token", "");
         spotifyRefreshToken = data.value("refresh_token", "");
         if (spotifyClientId == "PUT_HERE_CLIENT_ID" || spotifyClientSecret == "PUT_HERE_CLIENT_SECRET" || spotifyRefreshToken == "PUT_HERE_REFRESH_TOKEN" || spotifyAccessToken == "PUT_HERE_SPOTIFY_TOKEN") {
-            std::cout << "[!] You didn't paste all your Spotify Token ID's. Read README.md. ClutchSync won't work without it.\nYou must have Spotify Premium.\n";
+            std::cout << RED << "[!] You didn't paste all your Spotify Token ID's. Read README.md. ClutchSync won't work without it.\nYou must have Spotify Premium.\n" << RESET;
             return NO_SPOTIFY_ID_TOKEN;
         }
         return SUCCESS;
     }
     catch (const std::exception& e) {
-        std::cerr << "[!] JSON parse error: " << e.what() << "\n";
+        std::cerr << RED << "[!] JSON parse error: " << RESET << e.what() << "\n";
         return JSON_TOKEN_PARSING_ERROR;
     }
 }
@@ -366,7 +340,7 @@ std::string base64Encode(const std::string& in) {
 
 bool refreshSpotifyToken() {
     if (spotifyRefreshToken.empty() || spotifyClientId.empty() || spotifyClientSecret.empty()) {
-        std::cerr << "[!] No data to enable token refresh in token.json!\n";
+        std::cerr << RED << "[!] No data to enable token refresh in token.json!\n" << RESET;
         return false;
     }
 
@@ -392,7 +366,7 @@ bool refreshSpotifyToken() {
         auto j = json::parse(response);
         if (j.contains("access_token")) {
             spotifyAccessToken = j["access_token"].get<std::string>();
-            std::cout << "[Spotify API] Token successfully refreshed!\n";
+            std::cout << GREEN << "[Spotify API] " << RESET << "Token successfully refreshed!\n";
         }
         if (j.contains("refresh_token")) {
             spotifyRefreshToken = j["refresh_token"].get<std::string>();
@@ -409,12 +383,34 @@ bool refreshSpotifyToken() {
         return true;
     }
     catch (const std::exception& e) {
-        std::cerr << "[!] Parsing error of token response: " << e.what() << "\n";
+        std::cerr << RED << "[!] Parsing error of token response: " << RESET << e.what() << "\n";
     }
     return false;
 }
 
+std::string YesOrNo(std::string input) {
 
+    size_t first = input.find_first_not_of(" \t\n\r");
+    if (first != std::string::npos) {
+        size_t last = input.find_last_not_of(" \t\n\r");
+        input = input.substr(first, (last - first + 1));
+    }
+    else {
+        input.clear();
+    }
+    std::string IsItYes = "no";
+    if (input.empty() || std::tolower(static_cast<unsigned char>(input[0])) == 'y') {
+        IsItYes = "yes";
+        return IsItYes;
+    }
+    else {
+        return IsItYes;
+    }
+}
+
+
+
+/* -------------------------------------------------------------------------------- */
 // SPOTIFY API:
 
 bool sendSpotifyGet(const std::string& endpoint, std::string& responseOutput) {
@@ -428,7 +424,7 @@ bool sendSpotifyGet(const std::string& endpoint, std::string& responseOutput) {
     FILE* pipe = popen(command.c_str(), "r");
 #endif
     if (!pipe) {
-        std::cout << "[!] Couldn't open curl.exe\n";
+        std::cout << RED << "[!] Couldn't open curl.exe\n" << RESET;
         return false;
     }
     char buffer[128];
@@ -442,11 +438,11 @@ bool sendSpotifyGet(const std::string& endpoint, std::string& responseOutput) {
     int returnCode = pclose(pipe);
 #endif
     if (returnCode != 0) {
-        std::cout << "[!] curl.exe returned an error: " << returnCode << "\n";
+        std::cout << RED << "[!] curl.exe returned an error: " << RESET << returnCode << "\n";
         return false;
     }
     if (responseOutput.empty()) {
-        std::cout << "[!] curl.exe got an empty response\n";
+        std::cout << RED << "[!] curl.exe got an empty response\n" << RESET;
         return false;
     }
     return true;
@@ -479,17 +475,21 @@ ExitCode checkMusicLength(const std::string& lobbyTrack, const std::string& MVPT
                 }
                 // MVP music error
                 catch (const json::parse_error& errorMVP) {
-                    std::cout << "[!] Parsing error with MVP Music Length.\n[!] Error code: " << errorMVP.what() << "\n";
+                    std::cout << RED << "[!] Parsing error with MVP Music Length.\n[!] Error code: " << RESET << errorMVP.what() << "\n";
                 }
             }
         }
         // Lobby music error
         catch (const json::parse_error& errorLobby) {
-            std::cout << "[!] Parsing error with Lobby Music Length.\n[!] Error code: " << errorLobby.what() << "\n";
+            std::cout << RED << "[!] Parsing error with Lobby Music Length.\n[!] Error code: " << RESET << errorLobby.what() << "\n";
         }
     }
     // any error
     return JSON_MUSIC_LENGTH_PARSING_ERROR;
+    // music duration
+        /*
+        std::thread(checkMusicLength, config.lobbyUri, config.mvpUri, std::ref(g_LobbyMusicDuration), std::ref(g_MVPMusicDuration)).detach();
+        */
 }
 
 bool sendSpotifyPut(const std::string& endpoint, const std::string& jsonBody) {
@@ -525,21 +525,21 @@ bool sendSpotifyPut(const std::string& endpoint, const std::string& jsonBody) {
     try { statusCode = std::stoi(result); }
     catch (...) {}
     if (statusCode == 401) {
-        std::cout << "Token expired. Refreshing...\n";
+        std::cout << GREEN << "[Spotify API] " << RESET << "Token expired. Refreshing...\n";
         if (refreshSpotifyToken()) {
             return sendSpotifyPut(endpoint, jsonBody);
         }
     }
     else if (statusCode == 404) {
-        std::cerr << "[Spotify API[ Error 404: No active Spotify device found!\nClick play on any track in Spotify App to activate device and try again.\n";
+        std::cerr << YELLOW << "[Spotify API]" << RESET << " Error 404: No active Spotify device found!\nClick play on any track in Spotify App to activate device and try again.\n";
         return false;
     }
     if (statusCode == 204 || statusCode == 200) { // error 204 - No Content = success
-        std::cout << "[Spotify API] Request success (" << endpoint << ") HTTP: " << statusCode << "\n";
+        std::cout << GREEN << "[Spotify API] " << RESET << "Request success(" << endpoint << ") HTTP: " << statusCode << "\n";
         return true;
     }
     else {
-        std::cerr << "[Spotify API] Error on endpoint: " << endpoint << " | status: " << statusCode << "\n";
+        std::cerr << RED << "[Spotify API]" << RESET " Error on endpoint : " << endpoint << " | status : " << statusCode << "\n";
         if (statusCode) std::cerr << "[Spotify API] Response body: " << statusCode << "\n";
         return false;
     }
@@ -554,7 +554,7 @@ bool spotifyPlayUri(const std::string& uri, int positionMs) {
     };
     std::string endpoint = "/v1/me/player/play";
     if (sendSpotifyPut(endpoint, body.dump())) {
-        std::cout << "[Spotify API] Playing track: " << uri << " at " << positionMs << " ms.\n";
+        std::cout << GREEN << "[Spotify API] " << RESET << "Playing track : " << uri << " at " << positionMs << " ms.\n";
         return true;
     }
     return false;
@@ -567,7 +567,7 @@ void setSpotifyRepeat(const std::string& state) {
 
 bool spotifyPause() {
     if (sendSpotifyPut("/v1/me/player/pause", "{}")) {
-        std::cout << "[Spotify API] Playback paused.\n";
+        std::cout << GREEN << "[Spotify API] " << RESET << "Playback paused.\n";
         return true;
     }
     return false;
@@ -600,7 +600,44 @@ void fadeVolume(float startVol, float endVol, int durationMs, int targetState) {
 }
 
 
+
+/* -------------------------------------------------------------------------------- */
 // CS2 GSI:
+
+/* void checkCS2process(DWORD processId = 0) {
+    bool exists = false;
+    HANDLE hSnapshot = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
+    if (hSnapshot != INVALID_HANDLE_VALUE) {
+        PROCESSENTRY32 pe;
+        pe.dwSize = sizeof(PROCESSENTRY32);
+        if (Process32First(hSnapshot, &pe)) {
+            do {
+                if (_wcsicmp(pe.szExeFile, L"cs2.exe") == 0) {
+                    if (processId == 1 || pe.th32ProcessID == processId) {
+                        exists = true;
+                        break;
+                    }
+                }
+            } while (Process32Next(hSnapshot, &pe));
+        }
+        CloseHandle(hSnapshot);
+    }
+    if (exists) {
+        std::cout << "[!] Counter-Strike 2 is not running. Do you want to launch it? (Y/n): ";
+        std::string input;
+        std::getline(std::cin, input);
+        YesOrNo(input);
+        if (YesOrNo(input) == "yes") {
+            std::cout << "[i] Launching Counter-Strike 2...\n";
+            ShellExecuteW(NULL, L"open", L"cs2:", NULL, NULL, SW_SHOW);
+            std::this_thread::sleep_for(std::chrono::milliseconds(6000));
+        }
+        else {
+            std::cout << "[i] Skipping...\n";
+        }
+    }
+}
+*/
 
 bool isInLobby(const json& gsiData) {
     if (!gsiData.contains("map") || gsiData.value("player", json::object()).value("activity", "") == "menu") {
@@ -611,16 +648,12 @@ bool isInLobby(const json& gsiData) {
 
 void handleGameState(const json& j) { // "C:\Program Files (x86)\Steam\steamapps\common\Counter-Strike Global Offensive\game\csgo\cfg\gamestate_integration_ClutchSync.cfg"
     try {
-        
-        // music duration
-        /*
-        std::thread(checkMusicLength, config.lobbyUri, config.mvpUri, std::ref(g_LobbyMusicDuration), std::ref(g_MVPMusicDuration)).detach();
-        */
 
         if (isInLobby(j)) {
             if (currentState != STATE_LOBBY) {
                 currentState.store(STATE_LOBBY);
-                std::cout << "[CS2] Lobby / menu\n";
+                wasItUsed.store(true); // program is used, music will pause after use
+                std::cout << BLUE << "[CS" << YELLOW << "2" << BLUE << "] " << RESET << "Lobby / menu\n";
                 setSpotifyRepeat("track");
                 spotifyPlayUri(config.lobbyUri, config.lobbyStartMilliseconds);
                 fadeVolume(currentSpotifyVolume.load(), config.lobbyVol, config.fadeDurationMs, STATE_LOBBY);
@@ -634,7 +667,7 @@ void handleGameState(const json& j) { // "C:\Program Files (x86)\Steam\steamapps
             if (roundPhase == "freezetime") {
                 if (currentState.load() != STATE_FREEZETIME) {
                     currentState.store(STATE_FREEZETIME);
-                    std::cout << "[CS2][STATE_FREEZETIME] Shopping time.\n";
+                    std::cout << BLUE << "[CS" << YELLOW << "2" << BLUE << "] " << RESET << "Shopping time -> Playing freezeTime music.\n";
                     spotifyPlayUri(config.freezeTimeUri, config.freezeTimeStartMilliseconds);
                     setSpotifyRepeat("track");
                     fadeVolume(currentSpotifyVolume.load(), config.lobbyVol * 0.4f, config.fadeDurationMs, STATE_FREEZETIME);
@@ -646,7 +679,7 @@ void handleGameState(const json& j) { // "C:\Program Files (x86)\Steam\steamapps
                     currentState.store(STATE_LIVE);
 
                     if (cameFromFreeze) {
-                        std::cout << "[CS2] Round start -> Playing roundStart music/\n";
+                        std::cout << BLUE << "[CS" << YELLOW << "2" << BLUE << "] " << RESET << "Round start -> Playing roundStart music/\n";
                         std::thread([=]() {  // roundStart music when round starts
                             spotifyPlayUri(config.roundStartUri, config.roundStartStartMilliseconds);
                             setSpotifyVolume(config.roundStartVol);
@@ -662,7 +695,7 @@ void handleGameState(const json& j) { // "C:\Program Files (x86)\Steam\steamapps
                         }).detach();
                     }
                     else {
-                        std::cout << "[CS2] Round start (mid-game join) -> music muted & paused\n";
+                        std::cout << BLUE << "[CS" << YELLOW << "2" << BLUE << "] " << RESET << "Round start (mid-game join) -> music muted & paused\n";
                         std::thread([=]() {
                             fadeVolume(currentSpotifyVolume.load(), 0.0f, config.fadeDurationMs, STATE_LIVE);
                             std::this_thread::sleep_for(std::chrono::milliseconds(config.fadeDurationMs));
@@ -676,7 +709,7 @@ void handleGameState(const json& j) { // "C:\Program Files (x86)\Steam\steamapps
             else if (roundPhase == "over") {
                 if (currentState != STATE_OVER) {
                     currentState = STATE_OVER;
-                    std::cout << "[CS2] End of the round -> Checking MVP...\n";
+                    std::cout << BLUE << "[CS" << YELLOW << "2" << BLUE << "] " << RESET << "End of the round -> Checking MVP...\n";
 
                     bool gotMvp = false;
 
@@ -697,7 +730,7 @@ void handleGameState(const json& j) { // "C:\Program Files (x86)\Steam\steamapps
                         }
                     }
                     if (gotMvp) {
-                        std::cout << "[CS2] You got MVP! Playing: " << config.mvpUri << ".\n";
+                        std::cout << BLUE << "[CS" << YELLOW << "2" << BLUE << "] " << RESET << "You got MVP! Playing: " << config.mvpUri << ".\n";
                         setSpotifyVolume(0.0f);
                         spotifyPlayUri(config.mvpUri, config.mvpStartMilliseconds);
                         setSpotifyVolume(config.mvpVol);
@@ -721,7 +754,7 @@ void handleGameState(const json& j) { // "C:\Program Files (x86)\Steam\steamapps
                     }
                 }
                 else {
-                    std::cout << "[CS2] Someone else got MVP...\n";
+                    std::cout << BLUE << "[CS" << YELLOW << "2" << BLUE << "] " << RESET << "Someone else got MVP...\n";
                 }
             }
             if (!roundPhase.empty()) {
@@ -729,11 +762,13 @@ void handleGameState(const json& j) { // "C:\Program Files (x86)\Steam\steamapps
             }
         }
     } catch (const std::exception& e) {
-        std::cerr << "[!] GSI JSON exception caught: " << e.what() << "\n";
+        std::cerr << RED << "[!] GSI JSON exception caught: " << RESET << e.what() << "\n";
     }
 }
 
 
+
+/* -------------------------------------------------------------------------------- */
 // WINDOWS & SPOTIFY APP:
 
 bool checkSpotifyProcess(DWORD processId = 0) { // program start check
@@ -759,20 +794,11 @@ bool checkSpotifyProcess(DWORD processId = 0) { // program start check
 
 void checkAndStartSpotify() {
     if (checkSpotifyProcess()) return;
-    std::cout << "[!] Spotify is not running. Do you want to launch it? (Y/n): ";
+    std::cout << "[i] Spotify is not running. Do you want to launch it? (Y/n): ";
     std::string input;
     std::getline(std::cin, input);
-
-    size_t first = input.find_first_not_of(" \t\n\r");
-    if (first != std::string::npos) {
-        size_t last = input.find_last_not_of(" \t\n\r");
-        input = input.substr(first, (last - first + 1));
-    }
-    else {
-        input.clear();
-    }
-
-    if (input.empty() || std::tolower(static_cast<unsigned char>(input[0])) == 'y') {
+    YesOrNo(input);
+    if (YesOrNo(input) == "yes") {
         std::cout << "[i] Launching spotify...\n";
         ShellExecuteW(NULL, L"open", L"spotify:", NULL, NULL, SW_SHOW);
         std::this_thread::sleep_for(std::chrono::milliseconds(3000));
@@ -847,6 +873,8 @@ float setSpotifyVolume(float newVolume) {
 }
 
 
+
+/* -------------------------------------------------------------------------------- */
 // SERVER & CONSOLE HANDLER & INT MAIN():
 
 bool startServer() { // GSI server
@@ -858,14 +886,15 @@ bool startServer() { // GSI server
             std::lock_guard<std::mutex> lock(gsiMutex);
             handleGameState(j);
         }
-        catch (const std::exception& e) { std::cout << "[!] JSON Parsing error code: " << e.what() << " \n"; }
+        catch (const std::exception& e) { std::cout << RED << "[!] JSON Parsing error code: " << RESET << e.what() << " \n"; }
         res.status = 200;
         res.set_content("OK", "text/plain");
         });
-    std::cout << "[i] Server online on port 6767.\n[i] Waiting for CS2...";
 
+    std::cout << "[i] Server online on port 6767.\n[i] Waiting for CS2...\n";
+    // checkCS2process();
     if (!svr.listen("127.0.0.1", 6767)) {
-        std::cout << "[W] If the application doesn't work, use \"netstat - ano | findstr 127.0.0.1\" and write in \"void startServer()\": svr.listen(\"127.0.0.1\", ENTER_FREE_PORT_HERE);\", which doesn't appear in console.\nAlso don't forget to change port in \"gamestate_integration_ClutchSync.cfg\".\nBoth ports must be the same.\n";
+        std::cout << YELLOW << "[W] If the application doesn't work, use \"netstat - ano | findstr 127.0.0.1\" and write in \"void startServer()\": svr.listen(\"127.0.0.1\", ENTER_FREE_PORT_HERE);\", which doesn't appear in console.\nAlso don't forget to change port in \"gamestate_integration_ClutchSync.cfg\".\nBoth ports must be the same.\n" << RESET;
         return false;
     }
     return true;
@@ -873,9 +902,11 @@ bool startServer() { // GSI server
 
 BOOL WINAPI consoleHandler(DWORD signal) {
     if (signal == CTRL_CLOSE_EVENT || signal == CTRL_C_EVENT || signal == CTRL_LOGOFF_EVENT || signal == CTRL_SHUTDOWN_EVENT) {
-        std::cout << "\n[!] Cleanup: Restoring original Spotify volume (" << (originalSpotifyVolume * 100.0f) << "%)...\n";
+        std::cout << "\n[i] Cleanup: Restoring original Spotify volume (" << (originalSpotifyVolume * 100.0f) << "%)...\n";
         (void)CoInitializeEx(NULL, COINITBASE_MULTITHREADED);
-        spotifyPause();
+        if (wasItUsed == true) {
+            spotifyPause();
+        }
         setSpotifyVolume(originalSpotifyVolume);
         std::this_thread::sleep_for(std::chrono::milliseconds(200));
         CoUninitialize();
@@ -886,10 +917,18 @@ BOOL WINAPI consoleHandler(DWORD signal) {
 
 int main()
 {
-    std::cout << "=== ClutchSync by naxonn ===\n";
+    std::cout << "\033[38;5;240m" << "="
+              << "\033[38;5;245m" << "=" 
+              << "\033[38;5;250m" << "="
+              << RESET << " ClutchSync by naxonn "
+              << "\033[38;5;250m" << "="
+              << "\033[38;5;245m" << "="
+              << "\033[38;5;240m" << "=" << RESET << "\n";
+    std::cout << "\033[38;5;240m" << "VERSION: v1.1.0.\n";
+    // includeDebugInformation();
     HRESULT hr = CoInitializeEx(NULL, COINIT_MULTITHREADED);
     if (FAILED(hr)) {
-        std::cerr << "[!] Error: Couldn't initialize COM library.\n";
+        std::cerr << RED << "[!] Error: Couldn't initialize COM library.\n" << RESET;
         system("pause");
         return COM_ERROR;
     }
@@ -897,19 +936,19 @@ int main()
 
     ExitCode loadSettingsStatus = loadSettings();
     if (loadSettingsStatus != SUCCESS) {
-        std::cerr << "[!] Error code: " << loadSettingsStatus << ".\n";
+        std::cerr << RED << "[!] Error code: " << RESET << loadSettingsStatus << ".\n";
         config = AppSettings();
     }
 
     ExitCode loadTokenStatus = loadToken();
     if (loadTokenStatus != SUCCESS) {
-        std::cerr << "[!] Error with token read.\n[!] Error code: " << loadTokenStatus << ".\n";
+        std::cerr << RED << "[!] Error with token read.\n[!] Error code: " << RESET << loadTokenStatus << ".\n";
         CoUninitialize();
         system("pause");
         return loadTokenStatus;
     }
     else {
-        std::cout << "[CONFIG] token.json loaded.\n";
+        std::cout << CYAN << "[CONFIG] " << RESET << "token.json loaded.\n";
     }
 
     checkAndStartSpotify();
@@ -917,15 +956,14 @@ int main()
     std::this_thread::sleep_for(std::chrono::milliseconds(1000));
     
     originalSpotifyVolume = setSpotifyVolume(config.lobbyVol);
-    std::cout << "[i] Saved original Spotify volume: " << (originalSpotifyVolume * 100.0f) << "%\n";
+    std::cout << "[i] Saved original Spotify volume: " << (originalSpotifyVolume * 100.0f) << "%           \n";
 
     if (!startServer()) {
-        std::cerr << "[!] Port error! Read warning.\n";
+        std::cerr << RED << "[!] Port error! Read warning.\n" << RESET;
         CoUninitialize();
         return PORT_ERROR;
     }
 
     CoUninitialize();
-    return SUCCESS;
 }
 

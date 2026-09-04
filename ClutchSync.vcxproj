@@ -159,7 +159,9 @@
     <None Include="token.json" />
   </ItemGroup>
   <ItemGroup>
+    <ClInclude Include="debug.hpp" />
     <ClInclude Include="json.hpp" />
+    <ClInclude Include="pch.hpp" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">
